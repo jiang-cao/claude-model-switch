@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+CONFIG_FILE="$HOME/.claude/settings.json"
+
+# All available models
+MODELS=(
+  doubao-seed-2.0-code
+  doubao-seed-2.0-pro
+  minimax-m2.7
+  glm-5.1
+  glm-4.7
+  deepseek-v3.2
+  kimi-k2.6
+)
+
+# Check input arguments
+if [[ $# -eq 0 ]]; then
+  echo "Usage: $(basename "$0") <search-terms...>"
+  echo "Available models:"
+  printf '  %s\n' "${MODELS[@]}"
+  exit 1
+fi
+
+PATTERN="$*"  # Combine all arguments into a single pattern
+
+# Parse multiple space-separated search terms
+SEARCH_TERMS=($PATTERN)
+
+# Initialize candidate list with all models
+CANDIDATES=("${MODELS[@]}")
+
+# Filter candidates by each search term sequentially
+for term in "${SEARCH_TERMS[@]}"; do
+  FILTERED=()
+  for model in "${CANDIDATES[@]}"; do
+    if [[ "$model" == *"$term"* ]]; then
+      FILTERED+=("$model")
+    fi
+  done
+  CANDIDATES=("${FILTERED[@]}")
+done
+
+# No matching models found
+if [[ ${#CANDIDATES[@]} -eq 0 ]]; then
+  echo "❌ No model matched: '${SEARCH_TERMS[*]}'"
+  echo "Available models:"
+  printf '  %s\n' "${MODELS[@]}"
+  exit 1
+fi
+
+# Multiple matching models found
+if [[ ${#CANDIDATES[@]} -gt 1 ]]; then
+  echo "❌ Multiple models matched '${SEARCH_TERMS[*]}':"
+  printf '  %s\n' "${CANDIDATES[@]}"
+  echo ""
+  echo "Please add more search terms to narrow it down."
+  exit 1
+fi
+
+SELECTED_MODEL="${CANDIDATES[0]}"
+
+echo "🔄 Switching ANTHROPIC_MODEL to: $SELECTED_MODEL"
+
+# Ensure configuration file exists
+if [[ ! -f "$CONFIG_FILE" ]]; then
+  echo "❌ Config file not found: $CONFIG_FILE"
+  exit 1
+fi
+
+# Use jq for safe JSON modification (recommended)
+if command -v jq >/dev/null; then
+  TMPFILE=$(mktemp)
+  jq --arg model "$SELECTED_MODEL" \
+     '.env.ANTHROPIC_MODEL = $model' \
+     "$CONFIG_FILE" > "$TMPFILE" && mv "$TMPFILE" "$CONFIG_FILE"
+else
+  echo "⚠️  jq not found, falling back to sed (less safe)"
+  sed -i "s/\"ANTHROPIC_MODEL\": \".*\"/\"ANTHROPIC_MODEL\": \"$SELECTED_MODEL\"/" "$CONFIG_FILE"
+fi
+
+echo "✅ Model successfully switched to: $SELECTED_MODEL"
+echo ""
+echo "📋 To apply in your current shell, run:"
+echo "   export ANTHROPIC_MODEL=\"$SELECTED_MODEL\""
